@@ -10,3 +10,6 @@ This dashboard compares total confirmed COVID-19 cases between two locations of 
 
 ## LINK:
 http://kcmlin.shinyapps.io/rshiny-practice-1
+
+## PREVIEW:
+![](rshiny-practice-1-covidcompare.png)
