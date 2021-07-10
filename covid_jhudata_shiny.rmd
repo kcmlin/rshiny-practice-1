@@ -1,0 +1,314 @@
+---
+title: "COVID-19: Total Confirmed Cases in MD and PA"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+
+#------------------------------#
+# Load packages
+
+library(flexdashboard)
+library(tidyverse)
+library(lubridate)
+
+
+#------------------------------#
+# Load data into tidy format
+#     (source: JHU CSSE @ GitHub: https://github.com/CSSEGISandData/COVID-19 )
+
+confirm.us <- as_tibble(read.csv("time_series_covid19_confirmed_US.csv", stringsAsFactors = FALSE))
+
+
+#------------------------------#
+# Data cleaning
+#
+# Steps
+# 1. remove columns that are not needed
+# 2. convert data from wide to long 
+# 3a. clean date (substring date)
+# 3b. clean date (convert to date formate)
+# 3c. remove pre-cleaned dates
+# 4. rename variables
+
+confirm.us.2 <- confirm.us %>% 
+                    select(-c(UID:FIPS,Country_Region:Long_)) %>%                  # step 1.
+                    gather(key = "date", value = "cases", 4:84) %>%                # step 2.
+  
+                    separate(date, c("date.blank","date.2"), sep="X") %>%          # step 3a.
+                    mutate(date.3 = mdy(date.2)) %>%                               # step 3b.
+                    select(-c(date.blank, date.2)) %>%                             # step 3c.
+  
+                    rename(county = Admin2,                                        # step 4
+                           state = Province_State,
+                           county.state = Combined_Key,
+                           date = date.3)
+
+#-------------------------------#
+# Subset data for Shiny Demo
+
+confirm.md.pa <- confirm.us.2 %>% 
+                    filter(state %in% c("Maryland","Pennsylvania"))
+
+```
+
+## Column {.sidebar}
+
+**BACKGROUND:** 
+
+This dashboard was developed by Katherine Schaughency. The intent was to use the COVID-19 data to practice her R skill using tidyverse and flexdashboard. 
+
+**DASHBOARD:** 
+
+This dashboard compares total confirmed COVID-19 cases between two locations of interest. Data used to generate this dashboard came from JHU CSSE's COVID-19 GitHub page. Date range of the data was from 22 Jan 2020 to 11 Apr 2020.
+
+**USER INPUTS:** 
+
+```{r}
+
+#-------------------------------#
+# User Input on the locations of interest
+
+selectInput(inputId = "state.loc.1", 
+            label = "#1 State of Interest:",
+            choices = unique(confirm.md.pa$state),
+            selected = "Pennsylvania")
+
+selectInput(inputId = "state.loc.2", 
+            label = "#2 State of Interest:",
+            choices = unique(confirm.md.pa$state),
+            selected = "Maryland")
+
+selectInput(inputId = "county.loc.1", 
+            label = "#1 City or County of Interest:",
+            choices = unique(confirm.md.pa$county.state),
+            selected = "Berks, Pennsylvania, US")
+
+selectInput(inputId = "county.loc.2", 
+            label = "#2 City or County of Interest:",
+            choices = unique(confirm.md.pa$county.state),
+            selected = "Harford, Maryland, US")
+
+
+#-------------------------------#
+# Calculate the daily total across all subodinate adminstrative units 
+# (e.g., adding up cases confirmed in all counties of Maryland)
+
+confirm.state.1 <- reactive({
+
+        confirm.md.pa %>% 
+               filter(state == input$state.loc.1) %>%   
+               group_by(date) %>% 
+               summarize(cum.cases = sum(cases))
+  
+})
+
+confirm.county.1 <- reactive({
+
+        confirm.md.pa %>%
+               filter(county.state == input$county.loc.1) %>%   
+               group_by(date) %>% 
+               summarize(cum.cases = sum(cases)) 
+
+}) 
+
+confirm.state.2 <- reactive({
+  
+        confirm.md.pa %>% 
+               filter(state == input$state.loc.2) %>%   
+               group_by(date) %>% 
+               summarize(cum.cases = sum(cases)) 
+
+}) 
+
+confirm.county.2 <- reactive({
+  
+       confirm.md.pa %>%
+               filter(county.state == input$county.loc.2) %>%   
+               group_by(date) %>% 
+               summarize(cum.cases = sum(cases)) 
+}) 
+
+```
+
+## Column
+
+### Total confirmed cases in `r reactive({input$state.loc.1})`
+
+```{r}
+
+#-------------------------------#
+# Identify the last row of data (which is the info on the most current date).
+# Extract the number of confirmed cases from the most current date
+
+state.1.last <- reactive({
+
+        confirm.state.1() %>% 
+                 filter(row_number()==n()) %>% 
+                 magrittr::extract2("cum.cases")
+  
+})
+
+#-------------------------------#
+# Display the number of confirmed cases from the most current date
+
+renderValueBox({
+        
+        valueBox(value = state.1.last(),
+                 icon = "fa-area-chart",
+                 color = "lightgreen"
+        )
+})
+
+```
+
+### Total confirmed in `r reactive({input$state.loc.2})`
+
+```{r}
+
+#-------------------------------#
+# Identify the last row of data (which is the info on the most current date).
+# Extract the number of confirmed cases from the most current date
+
+state.2.last <- reactive({
+
+        confirm.state.2() %>% 
+                 filter(row_number()==n()) %>% 
+                 magrittr::extract2("cum.cases")
+  
+})
+
+
+#-------------------------------#
+# Display the number of confirmed cases from the most current date
+
+renderValueBox({
+        
+        valueBox(value = state.2.last(),
+                 icon = "fa-area-chart",
+                 color = "darkgreen"
+        )
+})
+
+```
+
+### STATE 1 vs STATE 2: </br> `r reactive({input$state.loc.1})` vs `r reactive({input$state.loc.2})`
+
+```{r}
+
+#-------------------------------#
+# Plot: Compare daily rolling total between state 1 and state 2
+
+renderPlot({
+
+    ggplot() +
+            geom_bar(data= confirm.state.1(),
+                     aes(x = date, y = cum.cases), 
+                     stat="identity", size=.1, fill="lightgreen", color="lightgreen", alpha=.4) +
+            geom_bar(data= confirm.state.2(),
+                     aes(x = date, y = cum.cases), 
+                     stat="identity", size=.1, fill="darkgreen", color="darkgreen", alpha=.4) +
+            labs(title = "Total number of confirmed cases (22 Jan 20 - 11 Apr 20)",
+                 x = "Date",
+                 y = "Accumulated Case Count") +
+            theme_bw()
+
+}, height = "auto", width = "auto")
+
+```
+
+
+## Column
+
+### Total confirmed in `r reactive({input$county.loc.1})`
+
+```{r}
+
+#-------------------------------#
+# Indentify the last row of data (which is the info on the most current date).
+# Extract the number of confirmed cases from the most current date
+
+county.1.last <- reactive({
+
+        confirm.county.1() %>% 
+                 filter(row_number()==n()) %>% 
+                 magrittr::extract2("cum.cases")
+  
+})
+
+
+#-------------------------------#
+# Display the number of confirmed cases from the most current date
+
+renderValueBox({
+        
+        valueBox(value = county.1.last(),
+                 icon = "fa-area-chart",
+                 color = "lightblue"
+        )
+})
+
+```
+
+### Total confirmed in `r reactive({input$county.loc.2})`
+
+```{r}
+
+
+#-------------------------------#
+# Indentify the last row of data (which is the info on the most current date).
+# Extract the number of confirmed cases from the most current date
+
+county.2.last <- reactive({
+
+        confirm.county.2() %>% 
+                 filter(row_number()==n()) %>% 
+                 magrittr::extract2("cum.cases")
+  
+})
+
+
+#-------------------------------#
+# Display the number of confirmed cases from the most current date
+
+renderValueBox({
+        
+        valueBox(value = county.2.last(),
+                 icon = "fa-area-chart",
+                 color = "darkblue"
+        )
+})
+
+```
+
+
+
+### CITY/COUNTY 1 vs. CITY/COUNTY 2: </br> `r reactive({input$county.loc.1})` vs `r reactive({input$county.loc.2})`
+
+```{r}
+
+#-------------------------------#
+# Plot: Compare daily rolling total between state 1 and state 2
+
+renderPlot({
+
+    ggplot() +
+            geom_bar(data= confirm.county.1(),
+                     aes(x = date, y = cum.cases), 
+                     stat="identity", size=.1, fill="lightblue", color="lightblue", alpha=.4) +
+            geom_bar(data= confirm.county.2(),
+                     aes(x = date, y = cum.cases), 
+                     stat="identity", size=.1, fill="darkblue", color="darkblue", alpha=.4) +
+            labs(title = "Total number of confirmed cases (22 Jan 20 - 11 Apr 20)",
+                 x = "Date",
+                 y = "Accumulated Case Count") +
+            theme_bw()
+
+
+}, height = "auto", width = "auto")
+
+```
+
+
+
